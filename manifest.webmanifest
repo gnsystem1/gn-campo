@@ -1,0 +1,29 @@
+{
+  "name": "GN Orçamentos Campo",
+  "short_name": "GN Campo",
+  "description": "Sistema mobile de orçamentos e produção da GN Gravações.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": [
+    "standalone",
+    "minimal-ui"
+  ],
+  "orientation": "portrait",
+  "background_color": "#061329",
+  "theme_color": "#0B2E65",
+  "icons": [
+    {
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
