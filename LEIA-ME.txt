@@ -1,0 +1,19 @@
+GN GRAVAÇÕES — ÍCONE PARA IPHONE
+
+Suba estes arquivos para a raiz do mesmo repositório do GitHub Pages:
+- index.html
+- apple-touch-icon.png
+- icon-192.png
+- icon-512.png
+- manifest.webmanifest
+
+Depois faça o commit e espere o GitHub Pages atualizar.
+
+IMPORTANTE NO IPHONE:
+1. Remova da Tela de Início o ícone antigo do GN Campo.
+2. Abra novamente o link do GitHub Pages no Safari.
+3. Compartilhar > Adicionar à Tela de Início.
+4. O nome deve aparecer como "GN Gravações".
+5. O ícone deve usar a logo atual da GN Gravações.
+
+O sistema Apps Script e o Desktop não precisam ser alterados.
