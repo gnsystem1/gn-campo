@@ -2123,19 +2123,16 @@ html.gn-field-app .tableWrap{
   <meta name="application-name" content="GN Campo">
   <meta name="format-detection" content="telephone=no">
 
-</head>
 
 <script>
 (function(){
-  const GN_BACKEND_KEY = 'GN_CAMPO_BACKEND_URL_V1';
+  const GN_BACKEND_KEY = 'GN_CAMPO_BACKEND_URL_V2';
+  const GN_RPC_CHANNEL = 'GN_CAMPO_RPC_V2';
   const pending = new Map();
-  const queue = [];
   let seq = 1;
-  let ready = false;
-  let bridgeOrigin = '*';
 
   function normalizarBackend(url){
-    return String(url || '').trim().replace(/\?.*$/,'');
+    return String(url || '').trim().replace(/[?#].*$/,'');
   }
 
   function backendAtual(){
@@ -2147,8 +2144,10 @@ html.gn-field-app .tableWrap{
     const erro = document.getElementById('gnBackendErro');
     const input = document.getElementById('gnBackendUrl');
 
-    document.getElementById('gnSplash')?.style && (document.getElementById('gnSplash').style.display='none');
-    document.getElementById('gnLogin')?.style && (document.getElementById('gnLogin').style.display='none');
+    const splash = document.getElementById('gnSplash');
+    const login = document.getElementById('gnLogin');
+    if(splash) splash.style.display='none';
+    if(login) login.style.display='none';
 
     if(input && !input.value) input.value = backendAtual();
     if(erro) erro.textContent = msg || '';
@@ -2160,53 +2159,89 @@ html.gn-field-app .tableWrap{
     if(tela) tela.style.display = 'none';
   }
 
-  function criarBridge(){
-    const url = backendAtual();
-    if(!url){
-      mostrarBackendSetup('');
-      return false;
-    }
-
-    ready = false;
-    const frame = document.getElementById('gnBridgeFrame');
-    if(!frame) return false;
-
-    const join = url.includes('?') ? '&' : '?';
-    frame.src = url + join + 'bridge=1&parentOrigin=' + encodeURIComponent(location.origin) + '&v=' + Date.now();
-    return true;
+  function criarCampo(form,nome,valor){
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = nome;
+    input.value = valor;
+    form.appendChild(input);
   }
 
-  function enviar(item){
-    if(!ready){
-      queue.push(item);
-      criarBridge();
-      return;
+  function limparTransporte(id){
+    const frame = document.getElementById('gn_rpc_frame_' + id);
+    const form = document.getElementById('gn_rpc_form_' + id);
+    if(form) form.remove();
+    if(frame){
+      setTimeout(function(){ frame.remove(); }, 50);
     }
-
-    pending.set(item.id, item);
-    const frame = document.getElementById('gnBridgeFrame');
-    if(!frame || !frame.contentWindow){
-      pending.delete(item.id);
-      item.failure && item.failure({message:'Backend indisponível.'});
-      return;
-    }
-
-    frame.contentWindow.postMessage({
-      type:'GN_RPC',
-      id:item.id,
-      method:item.method,
-      args:item.args
-    }, '*');
   }
 
   function rpc(method,args,success,failure){
-    enviar({
-      id:'rpc_' + (seq++),
-      method:String(method),
-      args:Array.isArray(args) ? args : [],
+    const backend = backendAtual();
+
+    if(!backend){
+      mostrarBackendSetup('');
+      if(typeof failure === 'function'){
+        failure({message:'Backend ainda não configurado.'});
+      }
+      return;
+    }
+
+    const id = 'r' + Date.now().toString(36) + '_' + (seq++);
+    const nonce = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    const frameName = 'gn_rpc_target_' + id;
+
+    const frame = document.createElement('iframe');
+    frame.id = 'gn_rpc_frame_' + id;
+    frame.name = frameName;
+    frame.style.display = 'none';
+    frame.setAttribute('aria-hidden','true');
+    document.body.appendChild(frame);
+
+    const form = document.createElement('form');
+    form.id = 'gn_rpc_form_' + id;
+    form.method = 'POST';
+    form.action = backend;
+    form.target = frameName;
+    form.style.display = 'none';
+    form.acceptCharset = 'UTF-8';
+
+    criarCampo(form,'gn_rpc','1');
+    criarCampo(form,'channel',GN_RPC_CHANNEL);
+    criarCampo(form,'id',id);
+    criarCampo(form,'nonce',nonce);
+    criarCampo(form,'origin',location.origin);
+    criarCampo(form,'method',String(method));
+    criarCampo(form,'payload',JSON.stringify(Array.isArray(args) ? args : []));
+
+    document.body.appendChild(form);
+
+    const timeout = setTimeout(function(){
+      if(!pending.has(id)) return;
+      pending.delete(id);
+      limparTransporte(id);
+      if(typeof failure === 'function'){
+        failure({message:'O backend demorou para responder. Confira a implantação /exec.'});
+      }
+    },30000);
+
+    pending.set(id,{
+      nonce:nonce,
       success:typeof success === 'function' ? success : null,
-      failure:typeof failure === 'function' ? failure : null
+      failure:typeof failure === 'function' ? failure : null,
+      timeout:timeout
     });
+
+    try{
+      form.submit();
+    }catch(err){
+      clearTimeout(timeout);
+      pending.delete(id);
+      limparTransporte(id);
+      if(typeof failure === 'function'){
+        failure({message:err && err.message ? err.message : 'Falha ao enviar para o backend.'});
+      }
+    }
   }
 
   function makeRunner(){
@@ -2226,7 +2261,7 @@ html.gn-field-app .tableWrap{
         if(typeof prop === 'symbol') return target[prop];
 
         return function(){
-          rpc(String(prop), Array.from(arguments), success, failure);
+          rpc(String(prop),Array.from(arguments),success,failure);
         };
       }
     });
@@ -2244,48 +2279,54 @@ html.gn-field-app .tableWrap{
   window.addEventListener('message',function(event){
     const data = event.data || {};
 
-    if(data.type === 'GN_BRIDGE_READY'){
-      ready = true;
-      esconderBackendSetup();
-
-      while(queue.length){
-        const item = queue.shift();
-        pending.set(item.id,item);
-        document.getElementById('gnBridgeFrame')?.contentWindow?.postMessage({
-          type:'GN_RPC',
-          id:item.id,
-          method:item.method,
-          args:item.args
-        }, '*');
-      }
-
-      if(window.__gnAguardandoInicio){
-        window.__gnAguardandoInicio = false;
-        if(typeof verificarSetupMobile === 'function') verificarSetupMobile();
-      }
+    if(data.channel !== GN_RPC_CHANNEL || data.type !== 'GN_RPC_RESULT'){
       return;
     }
 
-    if(data.type === 'GN_RPC_RESULT'){
-      const item = pending.get(data.id);
-      if(!item) return;
-      pending.delete(data.id);
+    const item = pending.get(data.id);
+    if(!item || item.nonce !== data.nonce){
+      return;
+    }
 
-      if(data.ok){
-        item.success && item.success(data.result);
-      }else{
-        item.failure && item.failure({
-          message:(data.error && data.error.message) || data.error || 'Erro no servidor.'
+    clearTimeout(item.timeout);
+    pending.delete(data.id);
+    limparTransporte(data.id);
+
+    if(data.ok){
+      if(item.success) item.success(data.result);
+    }else{
+      if(item.failure){
+        item.failure({
+          message:(data.error && data.error.message) || data.error || 'Erro no backend.'
         });
       }
     }
   });
 
+  function testarBackend(callbackErro){
+    google.script.run
+      .withSuccessHandler(function(){
+        esconderBackendSetup();
+        if(typeof verificarSetupMobile === 'function'){
+          verificarSetupMobile();
+        }
+      })
+      .withFailureHandler(function(err){
+        mostrarBackendSetup(
+          (err && err.message)
+            ? err.message
+            : 'Não consegui conectar ao backend.'
+        );
+        if(typeof callbackErro === 'function') callbackErro();
+      })
+      .getConfiguracaoMobile();
+  }
+
   window.salvarBackendPWA = function(){
     const input = document.getElementById('gnBackendUrl');
     const erro = document.getElementById('gnBackendErro');
     const btn = document.getElementById('gnBackendBtn');
-    const url = normalizarBackend(input?.value);
+    const url = normalizarBackend(input ? input.value : '');
 
     if(!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/i.test(url)){
       if(erro) erro.textContent = 'Cole o link /exec da implantação do Apps Script Backend.';
@@ -2299,17 +2340,12 @@ html.gn-field-app .tableWrap{
       btn.textContent = 'CONECTANDO...';
     }
 
-    criarBridge();
-
-    setTimeout(function(){
-      if(!ready){
-        if(btn){
-          btn.disabled = false;
-          btn.textContent = 'CONECTAR';
-        }
-        mostrarBackendSetup('Não consegui conectar. Confira se o link termina em /exec e se a implantação está acessível.');
+    testarBackend(function(){
+      if(btn){
+        btn.disabled = false;
+        btn.textContent = 'CONECTAR';
       }
-    },10000);
+    });
   };
 
   window.iniciarGNAppPWA = function(){
@@ -2318,8 +2354,7 @@ html.gn-field-app .tableWrap{
       return;
     }
 
-    window.__gnAguardandoInicio = true;
-    criarBridge();
+    testarBackend();
   };
 
   window.resetarBackendGN = function(){
@@ -2328,6 +2363,10 @@ html.gn-field-app .tableWrap{
   };
 })();
 </script>
+
+</head>
+
+
 
 
 <body>
@@ -2352,9 +2391,6 @@ html.gn-field-app .tableWrap{
     <small>Depois dessa conexão, o app pedirá o link da planilha oficial somente se o backend ainda não estiver configurado.</small>
   </div>
 </div>
-
-<iframe id="gnBridgeFrame" title="Conexão GN" style="display:none;border:0;width:0;height:0;"></iframe>
-
 <div id="gnSetupMobile" class="gnSetupMobile" style="display:none;">
   <div class="gnSetupCard">
     <div class="gnSetupMarca">GN MOBILE / CAMPO</div>
